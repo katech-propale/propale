@@ -20,7 +20,7 @@ const ForgotPassword = () => {
   const handleForgotPassword = async (data: ForgotPasswordFormInputs) => {
     const { email } = data;
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${process.env.NEXT_PUBLIC_REDIRECT_URL}/auth/reset-password`
+      redirectTo: `${process.env.NEXT_PUBLIC_URL}/auth/reset-password`
     });
     if (error) {
       setMessageSent(false);
@@ -50,7 +50,7 @@ const ForgotPassword = () => {
               </div>
               <div className="flex items-center justify-center">
                 <button
-                  className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded focus:outline-none focus:shadow-outline w-64 rounded-lg"
+                  className="bg-blueCustom hover:bg-blue-700 text-white py-2 px-4 rounded focus:outline-none focus:shadow-outline w-64 rounded-lg"
                   type="submit"
                 >
                   Envoyer

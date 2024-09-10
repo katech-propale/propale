@@ -18,7 +18,13 @@ const config = {
       },
     },
     extend: {
+      boxShadow: {
+        'custom-left': '-3px 0px 2px 0px #0000001A',
+      },
       colors: {
+        labelGray: 'rgba(151, 166, 186, 1)',
+        backgroundGray: 'rgba(241, 245, 249, 1)',
+        blueCustom: 'var(--surface-brand-primary-base, #0147FE)',
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",

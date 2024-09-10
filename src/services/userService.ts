@@ -1,91 +1,34 @@
+import { supabase, supabaseAdmin } from '@/lib/supabaseClient';
+import { AuthApiError, AuthUser } from '@supabase/supabase-js';
 import { ROLES } from '@/constants/roles';
-import { supabase } from '@/lib/supabaseClient';
 import { Profile } from '@/types/models';
 
-export const getUserDetails = async () => {
-  const { data: { user }, error: userError } = await supabase.auth.getUser();
-
-  if (userError) {
-    return null;
-  }
-
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', user?.id)
-    .single();
-
-  if (error) {
-    return null;
-  }
-
-  return data as Profile;
-};
-
-export const fetchProfilesWithUserDetails = async (companyId: string): Promise<Profile[]> => {
-  const { data: companyProfiles, error: companyProfilesError } = await supabase
-    .from('companies_profiles')
-    .select('profile_id')
-    .eq('company_id', companyId);
-
-  if (companyProfilesError) {
-    console.error('Error fetching profiles with user details:', companyProfilesError);
-    return [];
-  }
-
-  const profileDetailsPromises = companyProfiles.map(async ({ profile_id }) => {
-    const { data: profileData, error: profileError } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', profile_id)
-      .single();
-
-    if (profileError) {
-      console.error(`Error fetching details for profile ID ${profile_id}:`, profileError);
-      return null;
-    }
-
-    return profileData;
+export const createUser = async (email: string, password?: string): Promise<AuthUser | null> => {
+  const { data, error } = await supabaseAdmin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: { name: 'New User' }
   });
 
-  const profileDetails = await Promise.all(profileDetailsPromises);
-
-  return profileDetails.filter(profile => profile !== null) as Profile[];
-};
-
-export const fetchProfileById = async (userId: string): Promise<Profile | null> => {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', userId)
-    .single();
-
   if (error) {
-    return null;
+    return null
   }
 
-  return data as Profile;
+  return data?.user;
 };
 
-export const fetchProfileCountByCompanyId = async (companyId: string): Promise<number> => {
-  const { count, error } = await supabase
-    .from('companies_profiles')
-    .select('profile_id', { count: 'exact' })
-    .eq('company_id', companyId);
-
-  if (error) {
-    console.error('Error fetching profile count:', error);
-    return 0;
-  }
-
-  return count ?? 0;
-};
-
-export const fetchProfilesWithRoleSuperAdmin = async (): Promise<Profile[] | null> => {
-  const { data, error } = await supabase
+export const fetchProfilesWithRoleSuperAdmin = async (search?: string): Promise<Profile[] | null> => {
+  let query = supabase
     .from('profiles')
     .select('*')
     .eq('role', ROLES.SUPER_ADMIN);
+
+  if (search) {
+    query = query.or(`firstname.ilike.%${search}%,lastname.ilike.%${search}%`);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     return null;
@@ -106,4 +49,32 @@ export const fetchProfilesCountWithRoleSuperAdmin = async (): Promise<number> =>
   }
 
   return count ?? 0;
+};
+
+export const fetchProfileById = async (userId: string): Promise<Profile | null> => {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .single();
+
+  if (error) {
+    return null;
+  }
+
+  return data as Profile;
+};
+
+export const sendPasswordResetEmail = async (email: string) => {
+  const result = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${process.env.NEXT_PUBLIC_URL}/auth/reset-password`,
+  });
+
+  return result;
+};
+
+export const deleteUserAuth = async (userId: string): Promise<any> => {
+  const result = await supabaseAdmin.auth.admin.deleteUser(userId);
+
+  return result;
 };

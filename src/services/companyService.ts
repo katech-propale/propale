@@ -1,8 +1,12 @@
 import { supabase } from '@/lib/supabaseClient';
-import { Company } from '../types/models';
+import { Company, CompanyModalData, Profile } from '@/types/models';
+import { createUser, sendPasswordResetEmail } from './userService';
+import { createProfile, fetchProfilesWithUserDetails } from './profileService';
+import { associateProfileWithCompany } from './companyProfileService';
+import { ROLES } from '@/constants/roles';
 
-// Function to fetch company by its ID
-export const fetchCompanyById = async (companyId: string) => {
+// Fetch company by its ID
+export const fetchCompanyById = async (companyId: string): Promise<Company | null> => {
   const { data, error } = await supabase
     .from('company')
     .select('*')
@@ -17,8 +21,8 @@ export const fetchCompanyById = async (companyId: string) => {
   return data;
 };
 
-// Function to recursively find the top-most parent company without a company_id
-const findTopMostParentCompany = async (company: Company) => {
+// Recursively find the top-most parent company without a company_id
+const findTopMostParentCompany = async (company: Company): Promise<Company> => {
   if (!company.company_id) {
     return company;
   }
@@ -31,9 +35,8 @@ const findTopMostParentCompany = async (company: Company) => {
   return findTopMostParentCompany(parentCompany);
 };
 
-// Function to fetch the company without a company_id by profile_id
-export const fetchCompanyWithoutParentByProfileId = async (profileId: string) => {
-  // Fetch the companies associated with the profile
+// Fetch the company without a company_id by profile_id
+export const fetchCompanyWithoutParentByProfileId = async (profileId: string): Promise<Company | null> => {
   const { data: companies, error: companiesError } = await supabase
     .from('companies_profiles')
     .select('company_id')
@@ -44,17 +47,14 @@ export const fetchCompanyWithoutParentByProfileId = async (profileId: string) =>
     return null;
   }
 
-  if (companies.length === 0) {
+  if (!companies || companies.length === 0) {
     console.log('No companies found for this profile.');
     return null;
   }
 
-  // Iterate through the companies to find the one without a company_id
   for (let { company_id } of companies) {
     const company = await fetchCompanyById(company_id);
-    if (!company) {
-      continue;
-    }
+    if (!company) continue;
 
     const topMostParentCompany = await findTopMostParentCompany(company);
     if (!topMostParentCompany.company_id) {
@@ -66,8 +66,8 @@ export const fetchCompanyWithoutParentByProfileId = async (profileId: string) =>
   return null;
 };
 
-export const fetchCompaniesWithParentByProfileId = async (profileId: string) => {
-  // Fetch the companies associated with the profile
+// Fetch companies with a parent by profile_id
+export const fetchCompaniesWithParentByProfileId = async (profileId: string, search?: string): Promise<Company[]> => {
   const { data: companyProfileData, error: companyProfileError } = await supabase
     .from('companies_profiles')
     .select('company_id')
@@ -78,28 +78,48 @@ export const fetchCompaniesWithParentByProfileId = async (profileId: string) => 
     return [];
   }
 
-  if (companyProfileData.length === 0) {
+  if (!companyProfileData || companyProfileData.length === 0) {
     console.log('No companies found for this profile.');
     return [];
   }
 
-  // Fetch companies with a company_id
-  const companiesWithParent = [];
-  for (let { company_id } of companyProfileData) {
-    const company = await fetchCompanyById(company_id);
-    if (company && company.company_id) {
-      companiesWithParent.push(company);
-    }
-  }
+  let companyIds = companyProfileData.map(({ company_id }) => company_id);
 
-  return companiesWithParent;
-};
-
-export const fetchCompaniesByCompanyId = async (companyId: string) => {
-  const { data, error } = await supabase
+  let query = supabase
     .from('company')
     .select('*')
-    .eq('company_id', companyId);
+    .in('id', companyIds)
+    .not('company_id', 'is', null)
+    .neq('company_id', '')
+    .is('type', null);
+
+  if (search && search.length >= 3) {
+    query = query.or(`name.ilike.%${search}%,siret.ilike.%${search}%`);
+  }
+
+  const { data: companiesData, error: companiesError } = await query;
+
+  if (companiesError) {
+    console.error('Error fetching company details:', companiesError);
+    return [];
+  }
+
+  return companiesData;
+};
+
+// Fetch companies by company_id
+export const fetchCompaniesByCompanyId = async (companyId: string, search?: string): Promise<Company[]> => {
+  let query = supabase
+    .from('company')
+    .select('*')
+    .eq('company_id', companyId)
+    .is('type', null);
+
+  if (search && search.length >= 3) {
+    query = query.or(`name.ilike.%${search}%,siret.ilike.%${search}%`);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     console.error('Error fetching companies:', error);
@@ -109,11 +129,19 @@ export const fetchCompaniesByCompanyId = async (companyId: string) => {
   return data;
 };
 
-export const fetchAllCompaniesWithoutParent = async (): Promise<Company[]> => {
-  const { data, error } = await supabase
+// Fetch all companies without parent
+export const fetchAllCompaniesWithoutParent = async (search?: string): Promise<Company[]> => {
+  let query = supabase
     .from('company')
     .select('*')
-    .eq('company_id', '');
+    .eq('company_id', '')
+    .is('type', null);
+
+  if (search) {
+    query = query.or(`name.ilike.%${search}%,siren.ilike.%${search}%`);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     console.error('Error fetching companies without parent:', error);
@@ -121,4 +149,275 @@ export const fetchAllCompaniesWithoutParent = async (): Promise<Company[]> => {
   }
 
   return data;
+};
+
+// Create a new company
+export const createCompany = async (dataModal: CompanyModalData): Promise<Company | null> => {
+  const { data, error } = await supabase
+    .from('company')
+    .insert([{
+      company_id: dataModal.companyId,
+      prospect_id: '',
+      name: dataModal.name,
+      siret: dataModal.siret,
+      siren: dataModal.siren,
+      ape_code: dataModal.ape_code,
+      activity_sector: dataModal.activity_sector,
+      description: dataModal.description,
+      address: dataModal.address,
+      city: dataModal.city,
+      postalcode: dataModal.postalcode,
+      country: dataModal.country,
+      heat_level: dataModal.heatLevel,
+      status: dataModal.status,
+      type: dataModal.type,
+    }])
+    .select('*')
+    .single();
+
+  if (error) {
+    console.error('Error creating company:', error);
+    return null;
+  }
+
+  return data;
+};
+
+export const updateCompany = async (data: Company) => {
+  const { error } = await supabase
+    .from('company')
+    .update({
+      name: data.name,
+      siret: data.siret,
+      siren: data.siren,
+      ape_code: data.ape_code,
+      activity_sector: data.activity_sector,
+      description: data.description,
+      updated_at: new Date().toISOString(),
+      address: data.address,
+      city: data.city,
+      postalcode: data.postalcode,
+      country: data.country,
+      heat_level: data.heat_level,
+      status: data.status,
+      type: data.type,
+    })
+    .eq('id', data.id);
+
+  return error;
+};
+
+export const deleteCompany = async (companyId: string): Promise<boolean> => {
+  const { error } = await supabase
+    .from('company')
+    .delete()
+    .eq('id', companyId);
+
+  if (error) {
+    console.error('Error deleting company:', error);
+    return false;
+  }
+
+  return true;
+};
+
+
+export const createProspect = async (dataModal: CompanyModalData): Promise<Company | null> => {
+  try {
+    const data = await createCompany({ ...dataModal, type: 'prospect' });
+
+    if (data) {
+      try {
+        const user = await createUser(dataModal.email);
+        if (!user) throw new Error('Failed to create primary contact user');
+        
+        await sendPasswordResetEmail(dataModal.email);
+
+        const profileData = {
+          userId: user.id,
+          firstname: dataModal.firstname,
+          lastname: dataModal.lastname,
+          position: dataModal.position,
+          phone: dataModal.phone,
+          email: dataModal.email,
+          role: dataModal.role || 'prospect',
+          is_primary_contact: true,
+        };
+
+        await createProfile(profileData);
+        await associateProfileWithCompany(user.id, data.id);
+
+        if (dataModal.additionalContacts) {
+          for (const contact of dataModal.additionalContacts) {
+            const additionalUser = await createUser(contact.email);
+            if (!additionalUser) throw new Error('Failed to create additional contact user');
+
+            await sendPasswordResetEmail(contact.email);
+
+            const additionalProfileData = {
+              userId: additionalUser.id,
+              firstname: contact.firstname,
+              lastname: contact.lastname,
+              position: contact.position,
+              phone: contact.phone,
+              email: contact.email,
+              role: contact.role || 'prospect',
+              is_primary_contact: false,
+            };
+
+            await createProfile(additionalProfileData);
+            await associateProfileWithCompany(additionalUser.id, data.id);
+          }
+        }
+        return data;
+      } catch (error) {
+        console.error('Error creating user, profile, or associating profile with company:', error);
+        return null;
+      }
+    }
+    return null;
+  } catch (error) {
+    console.error('Error creating prospect company:', error);
+    return null;
+  }
+};
+
+
+export const fetchProspects = async (companyId: string, search?: string): Promise<Company[]> => {
+  let query = supabase
+    .from('company')
+    .select('*')
+    .eq('company_id', companyId)
+    .eq('type', ROLES.PROSPECT);
+
+  if (search) {
+    query = query.or(`name.ilike.%${search}%,siren.ilike.%${search}%`);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error('Error fetching prospects:', error);
+    return [];
+  }
+
+  return data;
+};
+
+export const deleteProspect = async (companyId: string): Promise<boolean> => {
+  const { error } = await supabase
+    .from('company')
+    .delete()
+    .eq('id', companyId);
+
+  if (error) {
+    console.error('Error deleting prospect:', error);
+    return false;
+  }
+
+  return true;
+};
+
+
+export const fetchAndCategorizeProfiles = async (
+  childCompanyId: string
+): Promise<{ attachedProfiles: Profile[]; unattachedProfiles: Profile[] }> => {
+  try {
+    // Fetch the company and its top-most parent company
+    const company = await fetchCompanyById(childCompanyId);
+    if (!company) {
+      throw new Error(`Company with ID ${childCompanyId} not found.`);
+    }
+
+    let parentCompany;
+
+    if (company.company_id) {
+      parentCompany = await fetchCompanyById(company.company_id);
+    }
+    if (!parentCompany) {
+      throw new Error(`Parent company for company ID ${childCompanyId} not found.`);
+    }
+
+    // Fetch profiles for both parent and child companies
+    const [parentCompanyProfiles, childCompanyProfiles] = await Promise.all([
+      fetchProfilesWithUserDetails(parentCompany.id),
+      fetchProfilesWithUserDetails(childCompanyId)
+    ]);
+
+    // Create a set of profile IDs associated with the child company for fast look-up
+    const childCompanyProfileIds = new Set(childCompanyProfiles.map(profile => profile.id));
+
+    // Categorize profiles into attached and unattached
+    const attachedProfiles: Profile[] = [];
+    const unattachedProfiles: Profile[] = [];
+
+    parentCompanyProfiles.forEach(profile => {
+      if (childCompanyProfileIds.has(profile.id)) {
+        attachedProfiles.push(profile);
+      } else {
+        unattachedProfiles.push(profile);
+      }
+    });
+
+    return { attachedProfiles, unattachedProfiles };
+  } catch (error) {
+    console.error('Error in fetchAndCategorizeProfiles:', error);
+    throw error;
+  }
+};
+
+
+export const checkSiretAndCompanyId = async (companyId: string, siret: string) => {
+  const { data: companyData, error } = await supabase
+    .from('company')
+    .select('*')
+    .eq('siret', siret);
+
+  if (error) {
+    console.error('Erreur lors de la vérification du SIRET:', error);
+    return false;
+  }
+
+  if (companyData && companyData.length > 0) {
+    const isSameCompanyId = companyData.some(
+      (company) => company.company_id === companyId);
+
+    if (isSameCompanyId) {
+      console.error('Une société avec le même SIRET et company_id existe déjà.');
+      return false;
+    } else {
+      console.warn('Une société avec le même SIRET mais un `company_id` différent existe.');
+      return true;
+    }
+  }
+
+  return true;
+};
+
+export const checkSirenAndCompanyId = async (companyId: string, siren: string) => {
+
+  const { data: companyData, error } = await supabase
+    .from('company')
+    .select('*')
+    .eq('siren', siren);
+
+  if (error) {
+    console.error('Erreur lors de la vérification du SIREN:', error);
+    return false;
+  }
+
+  if (companyData && companyData.length > 0) {
+    const isSameCompanyId = companyData.some(
+      (company) => company.company_id === companyId);
+
+    if (isSameCompanyId) {
+      console.error('Une société avec le même SIREN et company_id existe déjà.');
+      return false;
+    } else {
+      console.warn('Une société avec le même SIREN mais un `company_id` différent existe.');
+      return true;
+    }
+  }
+
+  return true;
 };

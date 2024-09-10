@@ -7,12 +7,15 @@ import { SlSettings } from "react-icons/sl";
 import Link from 'next/link';
 import Image from 'next/image';
 import { Company, Profile } from '@/types/models';
-import { fetchCompanyWithoutParentByProfileId } from '@/services/companyService';
-import { fetchProfileCountByCompanyId, fetchProfilesCountWithRoleSuperAdmin } from '@/services/userService';
+import { fetchCompanyById, fetchCompanyWithoutParentByProfileId } from '@/services/companyService';
+import { fetchProfilesCountWithRoleSuperAdmin } from '@/services/userService';
 import { ROLES } from '@/constants/roles';
+import { useUser } from '@/context/userContext';
+import { fetchProfileCountByCompanyId, updateUserProfile } from '@/services/profileService';
+import { useRouter } from 'next/router';
+import EditUserModal from '../modals/EditUserModal';
 
 interface SidebarProps {
-  user: Profile;
   currentPage: string;
   setPage: (page: string) => void;
   isDashboardHome: boolean;
@@ -28,32 +31,70 @@ interface NavigationLinkProps {
   onClick: () => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ user, currentPage = "folders", setPage, isDashboardHome }) => {
+const Sidebar: React.FC<SidebarProps> = ({ currentPage = "folders", setPage, isDashboardHome }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [company, setCompany] = useState<Company | null>(null);
+  const [company, setCompany] = useState<Company>();
   const [profileCount, setProfileCount] = useState<number>(0);
-  const isSuperAdmin = user.role === ROLES.SUPER_ADMIN;
+  const { user, refetchUser } = useUser();
+  const isSuperAdmin = user?.role === ROLES.SUPER_ADMIN;
+  const router = useRouter();
+  const companyId = router.query.id;
+  const [selectedUser, setSelectedUser] = useState<Profile | null>(null);
+  const [isModalOpenEdit, setIsModalOpenEdit] = useState(false);
+
+  const isProspect = router.pathname.startsWith('/dashboard/prospect');
 
   const toggleSidebar = () => {
     setIsCollapsed(!isCollapsed);
   };
 
+  const handleEditUser = () => {
+    setSelectedUser(user);
+    setIsModalOpenEdit(true);
+  };
+
+  const handleCloseModalEdit = () => {
+    setIsModalOpenEdit(false);
+    setSelectedUser(null);
+  };
+
+  const handleSubmitEdit = async (data: Profile) => {
+    if (user?.id) {
+      const error = await updateUserProfile(data, user.id);
+      if (error) {
+        console.error('Error updating user profile:', error);
+        return;
+      }
+    }
+    await refetchUser()
+    handleCloseModalEdit();
+  };
+
   useEffect(() => {
     const getCompany = async () => {
-      const companyData = await fetchCompanyWithoutParentByProfileId(user?.id);
-      setCompany(companyData);
+      let companyData
+      if (user) {
+        if (companyId) {
+          companyData = await fetchCompanyById(companyId as string)
+        } else {
+          companyData = await fetchCompanyWithoutParentByProfileId(user?.id);
+        }
+        if (companyData) {
+          setCompany(companyData);
+        }
+      }
     };
     if (!isDashboardHome) {
       getCompany();
     }
     
-  }, [user, isDashboardHome]);
+  }, [user, isDashboardHome, companyId]);
 
   useEffect(() => {
     if (isSuperAdmin && isDashboardHome) {
       fetchProfilesCountWithRoleSuperAdmin().then(count => setProfileCount(count));
     } else if (company) {
-      fetchProfileCountByCompanyId(company.id).then(count => setProfileCount(count));
+      fetchProfileCountByCompanyId(isProspect && company?.company_id ? company.company_id : company?.id).then(count => setProfileCount(count));
     }
   }, [company, isDashboardHome, isSuperAdmin]);
 
@@ -62,24 +103,40 @@ const Sidebar: React.FC<SidebarProps> = ({ user, currentPage = "folders", setPag
       <button onClick={toggleSidebar} className="self-end mb-4">
         {isCollapsed ? <FaChevronRight /> : <FaChevronLeft />}
       </button>
-      <Link href="/" className="flex mb-6">
+      <Link href={isSuperAdmin ? '/dashboard' : `/dashboard/folders/${isProspect ? company?.company_id : company?.id}`} className="flex mb-6">
         <Image src="/logo.svg" alt="Propale" width={isCollapsed ? 30 : 40} height={isCollapsed ? 30 : 40} className="mr-2" />
         {!isCollapsed && <span className="text-2xl font-bold">Propale</span>}
       </Link>
-      <UserProfile name={`${user?.firstname} ${user?.lastname}`} email={user?.email} isCollapsed={isCollapsed} />
+      {user && <UserProfile user={user} isCollapsed={isCollapsed} handleEditUser={handleEditUser} />}
+      {selectedUser && (
+        <EditUserModal
+          isOpen={isModalOpenEdit}
+          onRequestClose={handleCloseModalEdit}
+          onSubmit={handleSubmitEdit}
+          defaultValues={selectedUser}
+        />
+      )}
       <nav className="mt-6 w-full">
         {(company || isDashboardHome) && (
           <>
-            <NavigationLink
-              href={isSuperAdmin && isDashboardHome ? '/dashboard' : `/dashboard/folders/${company.id}`}
+            {isSuperAdmin && <NavigationLink
+              href={'/dashboard'}
+              icon={MdFolderOpen}
+              text="Clients"
+              onClick={() => setPage("folders")}
+              active={currentPage === "folders" && isDashboardHome}
+              isCollapsed={isCollapsed}
+            />}
+            {!isDashboardHome && <NavigationLink
+              href={`/dashboard/folders/${isProspect ? company?.company_id : company?.id}`}
               icon={MdFolderOpen}
               text="Mes dossiers"
               onClick={() => setPage("folders")}
-              active={currentPage === "folders"}
+              active={currentPage === "folders" && !isDashboardHome}
               isCollapsed={isCollapsed}
-            />
+            />}
             <NavigationLink
-              href={isSuperAdmin && isDashboardHome ? '/dashboard' : `/dashboard/users/${company.id}`}
+              href={isSuperAdmin && isDashboardHome ? '/dashboard' : `/dashboard/users/${isProspect ? company?.company_id : company?.id}`}
               icon={PiUsers}
               text="Utilisateurs"
               onClick={() => setPage("users")}
@@ -90,7 +147,7 @@ const Sidebar: React.FC<SidebarProps> = ({ user, currentPage = "folders", setPag
           </>
         )}
       </nav>
-      {!isSuperAdmin && !isDashboardHome && <div className="mt-auto w-full">
+      {isSuperAdmin && !isDashboardHome && <div className="mt-auto w-full">
         <NavigationLink
           href="/parametres"
           icon={SlSettings}
@@ -106,10 +163,10 @@ const Sidebar: React.FC<SidebarProps> = ({ user, currentPage = "folders", setPag
 
 const NavigationLink: React.FC<NavigationLinkProps> = ({ href, icon: Icon, text, active = false, count, isCollapsed, onClick }) => {
   return (
-    <Link href={href} className={`flex items-center ${isCollapsed ? 'p-2' : 'p-3'} rounded-md w-full ${active ? 'bg-blue-100 text-blue-600' : 'text-gray-400 hover:bg-gray-100'}`} onClick={onClick}>
+    <Link href={href} className={`flex items-center ${isCollapsed ? 'p-2' : 'p-3'} rounded-md w-full ${active ? 'bg-blue-100 text-blueCustom' : 'text-gray-400 hover:bg-gray-100'}`} onClick={onClick}>
       <div><Icon className="mr-3" size="30" /></div>
       {!isCollapsed && <span className="flex-1">{text}</span>}
-      {!isCollapsed && count && <span className={`text-sm ${active ? 'bg-blue-600' : 'bg-gray-400'} rounded-md px-2 py-0.5 text-white`}>{count}</span>}
+      {!isCollapsed && count && <span className={`text-sm ${active ? 'bg-blueCustom' : 'bg-gray-400'} rounded-md px-2 py-0.5 text-white`}>{count}</span>}
     </Link>
   );
 };
