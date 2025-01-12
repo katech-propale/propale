@@ -1,179 +1,109 @@
-import { useEffect, useState } from 'react';
-import { ColumnDef } from "@tanstack/react-table";
-import { FaPlus } from "react-icons/fa";
-import { LiaSortSolid } from "react-icons/lia";
-import { MoreVertical } from "lucide-react";
-import { DataTable } from '@/components/DataTable';
-import Header from '@/components/layout/Header';
-import Sidebar from '@/components/layout/Sidebar';
-import { fetchCompaniesByCompanyId, fetchCompaniesWithParentByProfileId, fetchCompanyById } from '@/services/companyService';
-import { Checkbox } from '@/components/common/Checkbox';
-import { Button } from '@/components/common/Button';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from '@/components/common/DropdownMenu';
-import { DropdownMenuTrigger } from '@radix-ui/react-dropdown-menu';
-import { Company, Profile } from '@/types/models';
+import { useState } from 'react';
 import { useRouter } from 'next/router';
-import { ROLES } from '@/constants/roles';
+import { useUser } from '@/context/userContext';
+import Header from '@/components/layout/Header';
+import ConfirmDeleteModal from '@/components/modals/ConfirmDeleteModal';
+import AddFolderModal from '@/components/modals/AddFolderModal';
+import AddProspectModal from '@/components/modals/AddProspectModal';
+import FoldersTable from '@/components/DataTable/FoldersTable';
+import { Company } from '@/types/models';
+import { FolderFormInputs } from '@/schemas/folder';
+import useCompanies from '@/hooks/useCompanies';
+import useCompanyData from '@/hooks/useCompanyData';
+import useProspects from '@/hooks/useProspects';
+import useModalState from '@/hooks/useModalState';
+import { CompanyFormInputs } from '@/schemas/company';
 
-export type Folder = {
-  id: string;
-  name: string;
-  activity_area: string;
-  siret: string;
-  siren?: string;
-};
-
-interface FoldersProps {
-  user: Profile;
-}
-
-const Folders: React.FC<FoldersProps> = ({ user }) => {
+const Folders: React.FC = () => {
   const router = useRouter();
   const { id } = router.query;
-  const [companies, setCompanies] = useState<Company[]>([]);
-  const [company, setCompany] = useState<Company | null>(null);
+  const { user } = useUser();
+  const [search, setSearch] = useState<string>('');
+  const [selectedFolder, setSelectedFolder] = useState<FolderFormInputs | null>(null);
+  const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
 
-  useEffect(() => {
-    if (user?.id) {
-      const getCompanies = async (objectId: string) => {
-        let data;
-        
-        if (user.role === ROLES.SALES) {
-          data = await fetchCompaniesWithParentByProfileId(objectId);
-        } else {
-          data = await fetchCompaniesByCompanyId(objectId);
-        }
-        
-        setCompanies(data);
-      };
-  
-      const getCompany = async () => {
-        const data = await fetchCompanyById(id as string);
-        setCompany(data);
-      };
-      if (company) {
-        getCompanies(company.id);
-      }
-      getCompany();
-    }
-  }, [company, id, user]);
+  const { companies, removeCompany, fetchData } = useCompanies(id as string, search);
+  const { company, updateCompanyData, createNewCompany } = useCompanyData(id as string);
+  const { addProspect } = useProspects(id as string, search);
 
-  const handleAddButtonClick = () => {
-    // todo
+  const { 
+    isModalOpen: isFolderModalOpen, 
+    openModal: openFolderModal, 
+    closeModal: closeFolderModal 
+  } = useModalState();
+
+  const { 
+    isModalOpen: isDeleteModalOpen, 
+    openModal: openDeleteModal, 
+    closeModal: closeDeleteModal 
+  } = useModalState();
+
+  const { 
+    isModalOpen: isProspectModalOpen, 
+    openModal: openProspectModal, 
+    closeModal: closeProspectModal 
+  } = useModalState();
+
+  const handleOpenModal = (data?: FolderFormInputs) => {
+    setSelectedFolder(data || null);
+    openFolderModal();
   };
 
-  const handleSearch = () => {
-    // todo
-  }
+  const handleCreateFolder = async (data: FolderFormInputs) => {
+    if (selectedFolder) {
+      await updateCompanyData({ ...data, id: selectedFolder.id });
+    } else {
+      await createNewCompany({ ...data, companyId: id as string });
+    }
+    closeFolderModal();
+    fetchData();
+  };
 
-  const columns: ColumnDef<Folder>[] = [
-    {
-      id: "select",
-      header: ({ table }) => (
-        <Checkbox
-          checked={
-            table.getIsAllPageRowsSelected() ||
-            (table.getIsSomePageRowsSelected() && "indeterminate")
-          }
-          onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-          aria-label="Select all"
-        />
-      ),
-      cell: ({ row }) => (
-        <Checkbox
-          checked={row.getIsSelected()}
-          onCheckedChange={(value) => row.toggleSelected(!!value)}
-          aria-label="Select row"
-        />
-      ),
-      enableSorting: false,
-      enableHiding: false,
-    },
-    {
-      accessorKey: "name",
-      id: "name",
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          className="flex items-center justify-start w-full p-0"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Nom du dossier
-          <LiaSortSolid className="ml-2 h-4 w-4" />
-        </Button>
-      ),
-      cell: ({ row }) => (
-        <div className="capitalize">{row.getValue("name")}</div>
-      ),
-    },
-    {
-      accessorKey: "siret",
-      id: "siret",
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Siret
-          <LiaSortSolid className="ml-2 h-4 w-4" />
-        </Button>
-      ),
-      cell: ({ row }) => <div className="lowercase">{row.getValue("siret")}</div>,
-    },
-    {
-      accessorKey: "activity_area",
-      id: "activity_area",
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Secteur d’activité
-          <LiaSortSolid className="ml-2 h-4 w-4" />
-        </Button>
-      ),
-      cell: ({ row }) => <div className="lowercase">{row.getValue("activity_area")}</div>,
-    },
-    {
-      id: "new_prospect",
-      enableHiding: false,
-      cell: ({ row }) => (
-        <button className="flex items-center text-blue-500 border border-2 border-blue-500 py-2 px-4 rounded-lg shadow-md hover:bg-blue-100">
-          Nouveau prospect
-          <FaPlus className="ml-2" />
-        </button>
-      ),
-    },
-    {
-      id: "menu",
-      enableHiding: false,
-      cell: ({ row }) => (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="h-8 w-8 p-0">
-              <MoreVertical className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem>Modifier</DropdownMenuItem>
-            <DropdownMenuItem>Supprimer</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ),
-    },
-  ];
+  const handleDeleteFolder = async () => {
+    if (selectedFolder?.id) {
+      await removeCompany(selectedFolder.id);
+      closeDeleteModal();
+      fetchData();
+    }
+  };
+
+  const handleCreateProspect = async (data: CompanyFormInputs) => {
+    await addProspect(data);
+    closeProspectModal();
+  };
 
   return (
     <div className="flex-1 p-6">
       <Header title={company?.name} subtitle="Mes dossiers" siren={company?.siren} />
-      <DataTable<Folder>
-        data={companies}
-        columns={columns}
-        placeholder="Recherche"
-        addButtonLabel="Ajouter un dossier"
-        onAddButtonClick={handleAddButtonClick}
-        onChangeSearch={handleSearch}
+      {companies && <FoldersTable
+        companies={companies}
+        handleOpenModal={handleOpenModal}
+        handleSearch={setSearch}
+        openProspectModal={(company) => { setSelectedCompany(company); openProspectModal(); }}
+        openDeleteModal={(folderId) => { setSelectedFolder({ id: folderId } as FolderFormInputs); openDeleteModal(); }}
+      />}
+      <AddFolderModal
+        isOpen={isFolderModalOpen}
+        onRequestClose={closeFolderModal}
+        onSubmit={handleCreateFolder}
+        defaultValues={selectedFolder}
+        role={user?.role}
+        companyId={id as string}
       />
+      <ConfirmDeleteModal
+        isOpen={isDeleteModalOpen}
+        onClose={closeDeleteModal}
+        onConfirm={handleDeleteFolder}
+        message="Êtes-vous sûr de vouloir supprimer ce dossier ?"
+      />
+      {selectedCompany && (
+        <AddProspectModal
+          isOpen={isProspectModalOpen}
+          onRequestClose={closeProspectModal}
+          onSubmit={handleCreateProspect}
+          company={selectedCompany}
+        />
+      )}
     </div>
   );
 };

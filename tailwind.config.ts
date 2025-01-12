@@ -18,7 +18,20 @@ const config = {
       },
     },
     extend: {
+      screens: {
+        'lg-only': '1180px',
+      },
+      fontFamily: {
+        sans: ['Poppins', 'sans-serif'], // Add Poppins as the default sans-serif font
+      },
+      boxShadow: {
+        'custom-left': '-3px 0px 2px 0px #0000001A',
+      },
       colors: {
+        labelGray: 'rgba(151, 166, 186, 1)',
+        backgroundGray: 'rgba(241, 245, 249)',
+        backgroundBlue: 'rgb(232, 238, 254)',
+        blueCustom: 'var(--surface-brand-primary-base, #0147FE)',
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",

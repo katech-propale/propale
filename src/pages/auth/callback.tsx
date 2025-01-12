@@ -1,7 +1,8 @@
 import { supabase, supabaseAdmin } from '@/lib/supabaseClient';
+import handleSessionAndRedirect from '@/services/authService';
 import { fetchCompanyWithoutParentByProfileId } from '@/services/companyService';
 import { useRouter } from 'next/router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 
 const Callback = () => {
   const router = useRouter();
@@ -19,13 +20,8 @@ const Callback = () => {
         if (!user.app_metadata.providers.includes('email')) {
           await supabase.auth.signOut();
           await supabaseAdmin.auth.admin.deleteUser(user.id);
-          router.push('/');
-        } else {
-          const company = await fetchCompanyWithoutParentByProfileId(user?.id);
-          if (company) {
-            router.push(`/dashboard/folders/${company.id}`);
-          }
         }
+        await handleSessionAndRedirect(user, session, router);
       }
     };
 
@@ -35,7 +31,7 @@ const Callback = () => {
   return (
     <div className="min-h-screen flex items-center justify-center">
       <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md">
-        <h3 className="text-xl font-bold mb-6">Redirection en cours...</h3>
+        <h3 className="text-xl font-medium mb-6">Redirection en cours...</h3>
       </div>
     </div>
   );
